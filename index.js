@@ -5,7 +5,11 @@ const {
     Routes, 
     SlashCommandBuilder, 
     InteractionContextType, 
-    ApplicationIntegrationType 
+    ApplicationIntegrationType,
+    ButtonBuilder,
+    ButtonStyle,
+    ActionRowBuilder,
+    ComponentType
 } = require('discord.js');
 
 const client = new Client({ intents: [GatewayIntentBits.Guilds] });
@@ -16,7 +20,7 @@ const clientId = process.env.CLIENT_ID;
 const commands = [
     new SlashCommandBuilder()
         .setName('mesaj')
-        .setDescription('Yazdığın mesajı kanala 20 kere atar.')
+        .setDescription('Mesaj göndermek için butonlu panel açar.')
         .addStringOption(option =>
             option
                 .setName('mesajim')
@@ -62,30 +66,49 @@ client.on('interactionCreate', async interaction => {
     if (interaction.commandName === 'mesaj') {
         const mesajim = interaction.options.getString('mesajim');
 
-        // İlk gizli onay mesajı
-        await interaction.reply({ 
-            content: 'Mesaj gönderimi başlatıldı!', 
-            ephemeral: true 
-        }).catch(err => console.error("Yanıt hatası:", err));
+        // Spamlama Butonu Oluşturma
+        const basButon = new ButtonBuilder()
+            .setCustomId('spam_baslat')
+            .setLabel('🚀 20 Mesaj Gönder')
+            .setStyle(ButtonStyle.Danger);
 
-        // 20 mesaj gönderme döngüsü
-        for (let i = 0; i < 20; i++) {
-            try {
-                // Öncelik 1: Normal kanal varsa kanala gönder
-                if (interaction.channel) {
-                    await interaction.channel.send(mesajim);
-                } else {
-                    // Öncelik 2: Kanal yoksa (DM / Özel Etkileşim) followUp kullan
-                    await interaction.followUp({ content: mesajim });
+        const row = new ActionRowBuilder().addComponents(basButon);
+
+        // Kullanıcıya özel (ephemeral) butonlu mesaj gönder
+        const response = await interaction.reply({
+            content: `Hazır! Aşağıdaki butona bastığında şu mesaj 20 kez gönderilecek:\n> **${mesajim}**`,
+            components: [row],
+            ephemeral: true
+        });
+
+        // Buton Dinleyicisi (Sadece komutu yazan kişinin butonuna odaklanır)
+        const collector = response.createMessageComponentCollector({
+            componentType: ComponentType.Button,
+            time: 300000 // 5 dakika boyunca buton aktif kalır
+        });
+
+        collector.on('collect', async buttonInteraction => {
+            if (buttonInteraction.customId === 'spam_baslat') {
+                // Butona tıklandığında anında yanıt verip dondurmayı önlüyoruz
+                await buttonInteraction.reply({ content: 'Spam başlatıldı!', ephemeral: true });
+
+                // 20 mesaj gönderme döngüsü
+                for (let i = 0; i < 20; i++) {
+                    try {
+                        if (interaction.channel) {
+                            await interaction.channel.send(mesajim);
+                        } else {
+                            await interaction.followUp({ content: mesajim });
+                        }
+                    } catch (err) {
+                        await interaction.followUp({ content: mesajim }).catch(() => {});
+                    }
+
+                    // Hızlı atması için 0.1 saniye (100ms) bekleme
+                    await new Promise(resolve => setTimeout(resolve, 100));
                 }
-            } catch (err) {
-                // Kanal izni yoksa alternatif olarak followUp ile gönder
-                await interaction.followUp({ content: mesajim }).catch(() => {});
             }
-
-            // Hızlı gönderim için 0.1 saniye (100ms) bekleme
-            await new Promise(resolve => setTimeout(resolve, 100));
-        }
+        });
     }
 });
 
