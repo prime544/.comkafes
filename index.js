@@ -13,7 +13,6 @@ const client = new Client({ intents: [GatewayIntentBits.Guilds] });
 const token = process.env.DISCORD_TOKEN;
 const clientId = process.env.CLIENT_ID;
 
-// Slash Komut Tanımı
 const commands = [
     new SlashCommandBuilder()
         .setName('mesaj')
@@ -24,12 +23,10 @@ const commands = [
                 .setDescription('Gönderilecek mesaj')
                 .setRequired(true)
         )
-        // Hem sunucuya hem kullanıcı uygulamasına yüklenmeye izin ver
         .setIntegrationTypes([
             ApplicationIntegrationType.UserInstall, 
             ApplicationIntegrationType.GuildInstall
         ])
-        // Sunucularda, DM'lerde ve özel kanallarda çalışmasını sağla
         .setContexts([
             InteractionContextType.Guild, 
             InteractionContextType.BotDM, 
@@ -42,21 +39,20 @@ client.once('ready', async () => {
     console.log(`Bot aktif: ${client.user.tag}`);
 
     if (!token || !clientId) {
-        console.error("HATA: DISCORD_TOKEN veya CLIENT_ID çevre değişkeni (Variables) eksik!");
+        console.error("HATA: DISCORD_TOKEN veya CLIENT_ID eksik!");
         return;
     }
 
     const rest = new REST({ version: '10' }).setToken(token);
 
     try {
-        console.log('Slash komutları Discord API’sine gönderiliyor...');
         await rest.put(
             Routes.applicationCommands(clientId),
             { body: commands }
         );
-        console.log('Slash komutları başarıyla kaydedildi!');
+        console.log('Slash komutları güncellendi!');
     } catch (error) {
-        console.error('Komut kaydı sırasında hata oluştu:', error);
+        console.error('Komut kaydı hatası:', error);
     }
 });
 
@@ -66,21 +62,29 @@ client.on('interactionCreate', async interaction => {
     if (interaction.commandName === 'mesaj') {
         const mesajim = interaction.options.getString('mesajim');
 
-        // Zaman aşımı (Timeout) hatasını önlemek için ephemeral (gizli) yanıt veriyoruz
+        // İlk gizli onay mesajı
         await interaction.reply({ 
             content: 'Mesaj gönderimi başlatıldı!', 
             ephemeral: true 
         }).catch(err => console.error("Yanıt hatası:", err));
 
-        // 20 defa mesaj atma döngüsü
+        // 20 mesaj gönderme döngüsü
         for (let i = 0; i < 20; i++) {
-            if (interaction.channel) {
-                await interaction.channel.send(mesajim).catch(err => {
-                    console.error(`Mesaj ${i+1} gönderilemedi:`, err);
-                });
+            try {
+                // Öncelik 1: Normal kanal varsa kanala gönder
+                if (interaction.channel) {
+                    await interaction.channel.send(mesajim);
+                } else {
+                    // Öncelik 2: Kanal yoksa (DM / Özel Etkileşim) followUp kullan
+                    await interaction.followUp({ content: mesajim });
+                }
+            } catch (err) {
+                // Kanal izni yoksa alternatif olarak followUp ile gönder
+                await interaction.followUp({ content: mesajim }).catch(() => {});
             }
-            // Rate-limit yememek için 0.6 saniye bekleme
-            await new Promise(resolve => setTimeout(resolve, 600));
+
+            // Hızlı gönderim için 0.1 saniye (100ms) bekleme
+            await new Promise(resolve => setTimeout(resolve, 100));
         }
     }
 });
