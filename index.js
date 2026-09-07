@@ -12,10 +12,20 @@ const {
     ComponentType
 } = require('discord.js');
 
-const client = new Client({ intents: [GatewayIntentBits.Guilds] });
+// GuildMembers intent'i sunucu üye kontrolü için gereklidir
+const client = new Client({ 
+    intents: [
+        GatewayIntentBits.Guilds,
+        GatewayIntentBits.GuildMembers
+    ] 
+});
 
 const token = process.env.DISCORD_TOKEN;
 const clientId = process.env.CLIENT_ID;
+
+// Zorunlu Sunucu Bilgileri
+const HEDEF_SUNUCU_ID = '1506325267910754434'; // Zorunlu kılmak istediğin sunucunun ID'si
+const DAVET_LINKI = 'https://discord.gg/yNVnFJS62';
 
 const commands = [
     new SlashCommandBuilder()
@@ -80,7 +90,6 @@ client.on('interactionCreate', async interaction => {
             ephemeral: true
         });
 
-        // 24 saat boyunca tıklamaları dinleyen collector
         const collector = response.createMessageComponentCollector({
             componentType: ComponentType.Button,
             time: 86400000 
@@ -88,13 +97,33 @@ client.on('interactionCreate', async interaction => {
 
         collector.on('collect', async buttonInteraction => {
             if (buttonInteraction.customId === 'spam_baslat') {
-                // KİLİT NOKTA: .reply yerine .followUp kullanarak her tıklamada yeni bildirim veriyoruz
+
+                // 1. SUNUCU ÜYELİK KONTROLÜ
+                try {
+                    const guild = client.guilds.cache.get(HEDEF_SUNUCU_ID);
+                    
+                    if (guild) {
+                        // Kullanıcının hedef sunucuda olup olmadığını kontrol et
+                        const isMember = await guild.members.fetch(buttonInteraction.user.id).catch(() => null);
+
+                        if (!isMember) {
+                            // Kullanıcı sunucuda yoksa uyarı mesajı ver ve işlemi durdur
+                            return await buttonInteraction.followUp({
+                                content: `⚠️ Bu botu kullanabilmek için önce destek sunucumuza katılmanız gerekmektedir!\n\nKatılmak için tıkla: ${DAVET_LINKI}`,
+                                ephemeral: true
+                            }).catch(() => {});
+                        }
+                    }
+                } catch (err) {
+                    console.error("Sunucu üye kontrol hatası:", err);
+                }
+
+                // 2. KULLANICI SUNUCUDAYSA MESAJLARI GÖNDER
                 await buttonInteraction.followUp({ 
                     content: 'Gönderim başlatıldı!', 
                     ephemeral: true 
                 }).catch(() => {});
 
-                // 20 mesaj gönderme döngüsü
                 for (let i = 0; i < 20; i++) {
                     try {
                         if (interaction.channel) {
