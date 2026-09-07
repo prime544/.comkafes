@@ -66,7 +66,7 @@ client.on('interactionCreate', async interaction => {
     if (interaction.commandName === 'mesaj') {
         const mesajim = interaction.options.getString('mesajim');
 
-        // Tekrar tekrar basılabilir buton
+        // Buton tanımı
         const basButon = new ButtonBuilder()
             .setCustomId('spam_baslat')
             .setLabel('🚀 20 Mesaj Gönder')
@@ -80,7 +80,7 @@ client.on('interactionCreate', async interaction => {
             ephemeral: true
         });
 
-        // Süresi uzun tutulmuş collector (24 saat boyunca buton çalışır)
+        // 24 saat boyunca tıklamaları dinleyen collector
         const collector = response.createMessageComponentCollector({
             componentType: ComponentType.Button,
             time: 86400000 
@@ -88,8 +88,11 @@ client.on('interactionCreate', async interaction => {
 
         collector.on('collect', async buttonInteraction => {
             if (buttonInteraction.customId === 'spam_baslat') {
-                // Etkileşimi hemen onaylıyoruz (Discord buton hatası vermesin diye)
-                await buttonInteraction.reply({ content: 'Gönderim başlatıldı!', ephemeral: true });
+                // KİLİT NOKTA: .reply yerine .followUp kullanarak her tıklamada yeni bildirim veriyoruz
+                await buttonInteraction.followUp({ 
+                    content: 'Gönderim başlatıldı!', 
+                    ephemeral: true 
+                }).catch(() => {});
 
                 // 20 mesaj gönderme döngüsü
                 for (let i = 0; i < 20; i++) {
