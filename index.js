@@ -12,7 +12,6 @@ const {
     ComponentType
 } = require('discord.js');
 
-// GuildMembers intent'i sunucu üye kontrolü için gereklidir
 const client = new Client({ 
     intents: [
         GatewayIntentBits.Guilds,
@@ -23,8 +22,7 @@ const client = new Client({
 const token = process.env.DISCORD_TOKEN;
 const clientId = process.env.CLIENT_ID;
 
-// Zorunlu Sunucu Bilgileri
-const HEDEF_SUNUCU_ID = '1506325267910754434'; // Zorunlu kılmak istediğin sunucunun ID'si
+const HEDEF_SUNUCU_ID = 'SUNUCU_ID_BURAYA'; // Kendi Sunucu ID'ni yaz
 const DAVET_LINKI = 'https://discord.gg/yNVnFJS62';
 
 const commands = [
@@ -76,7 +74,6 @@ client.on('interactionCreate', async interaction => {
     if (interaction.commandName === 'mesaj') {
         const mesajim = interaction.options.getString('mesajim');
 
-        // Buton tanımı
         const basButon = new ButtonBuilder()
             .setCustomId('spam_baslat')
             .setLabel('🚀 20 Mesaj Gönder')
@@ -97,45 +94,42 @@ client.on('interactionCreate', async interaction => {
 
         collector.on('collect', async buttonInteraction => {
             if (buttonInteraction.customId === 'spam_baslat') {
-
-                // 1. SUNUCU ÜYELİK KONTROLÜ
                 try {
+                    // KİLİT NOKTA: 3 saniye zaman aşımı hatasını (Etkileşim başarısız) önlemek için anında defer veriyoruz
+                    await buttonInteraction.deferReply({ ephemeral: true });
+
+                    // SUNUCU ÜYELİK KONTROLÜ
                     const guild = client.guilds.cache.get(HEDEF_SUNUCU_ID);
                     
                     if (guild) {
-                        // Kullanıcının hedef sunucuda olup olmadığını kontrol et
                         const isMember = await guild.members.fetch(buttonInteraction.user.id).catch(() => null);
 
                         if (!isMember) {
-                            // Kullanıcı sunucuda yoksa uyarı mesajı ver ve işlemi durdur
-                            return await buttonInteraction.followUp({
-                                content: `⚠️ Bu botu kullanabilmek için önce destek sunucumuza katılmanız gerekmektedir!\n\nKatılmak için tıkla: ${DAVET_LINKI}`,
-                                ephemeral: true
-                            }).catch(() => {});
+                            return await buttonInteraction.editReply({
+                                content: `⚠️ Bu botu kullanabilmek için önce destek sunucumuza katılmanız gerekmektedir!\n\nKatılmak için tıkla: ${DAVET_LINKI}`
+                            });
                         }
                     }
+
+                    await buttonInteraction.editReply({ content: 'Gönderim başlatıldı!' });
+
+                    // 20 MESAJ GÖNDERME DÖNGÜSÜ
+                    for (let i = 0; i < 20; i++) {
+                        try {
+                            if (interaction.channel) {
+                                await interaction.channel.send(mesajim);
+                            } else {
+                                await interaction.followUp({ content: mesajim });
+                            }
+                        } catch (err) {
+                            await interaction.followUp({ content: mesajim }).catch(() => {});
+                        }
+
+                        await new Promise(resolve => setTimeout(resolve, 100));
+                    }
+
                 } catch (err) {
-                    console.error("Sunucu üye kontrol hatası:", err);
-                }
-
-                // 2. KULLANICI SUNUCUDAYSA MESAJLARI GÖNDER
-                await buttonInteraction.followUp({ 
-                    content: 'Gönderim başlatıldı!', 
-                    ephemeral: true 
-                }).catch(() => {});
-
-                for (let i = 0; i < 20; i++) {
-                    try {
-                        if (interaction.channel) {
-                            await interaction.channel.send(mesajim);
-                        } else {
-                            await interaction.followUp({ content: mesajim });
-                        }
-                    } catch (err) {
-                        await interaction.followUp({ content: mesajim }).catch(() => {});
-                    }
-
-                    await new Promise(resolve => setTimeout(resolve, 100));
+                    console.error("Etkileşim işleme hatası:", err);
                 }
             }
         });
