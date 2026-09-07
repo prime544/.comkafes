@@ -66,7 +66,7 @@ client.on('interactionCreate', async interaction => {
     if (interaction.commandName === 'mesaj') {
         const mesajim = interaction.options.getString('mesajim');
 
-        // Spamlama Butonu Oluşturma
+        // Tekrar tekrar basılabilir buton
         const basButon = new ButtonBuilder()
             .setCustomId('spam_baslat')
             .setLabel('🚀 20 Mesaj Gönder')
@@ -74,23 +74,22 @@ client.on('interactionCreate', async interaction => {
 
         const row = new ActionRowBuilder().addComponents(basButon);
 
-        // Kullanıcıya özel (ephemeral) butonlu mesaj gönder
         const response = await interaction.reply({
-            content: `Hazır! Aşağıdaki butona bastığında şu mesaj 20 kez gönderilecek:\n> **${mesajim}**`,
+            content: `Hazır! Butona her bastığında şu mesaj 20 kez gönderilecek:\n> **${mesajim}**`,
             components: [row],
             ephemeral: true
         });
 
-        // Buton Dinleyicisi (Sadece komutu yazan kişinin butonuna odaklanır)
+        // Süresi uzun tutulmuş collector (24 saat boyunca buton çalışır)
         const collector = response.createMessageComponentCollector({
             componentType: ComponentType.Button,
-            time: 300000 // 5 dakika boyunca buton aktif kalır
+            time: 86400000 
         });
 
         collector.on('collect', async buttonInteraction => {
             if (buttonInteraction.customId === 'spam_baslat') {
-                // Butona tıklandığında anında yanıt verip dondurmayı önlüyoruz
-                await buttonInteraction.reply({ content: 'Spam başlatıldı!', ephemeral: true });
+                // Etkileşimi hemen onaylıyoruz (Discord buton hatası vermesin diye)
+                await buttonInteraction.reply({ content: 'Gönderim başlatıldı!', ephemeral: true });
 
                 // 20 mesaj gönderme döngüsü
                 for (let i = 0; i < 20; i++) {
@@ -104,7 +103,6 @@ client.on('interactionCreate', async interaction => {
                         await interaction.followUp({ content: mesajim }).catch(() => {});
                     }
 
-                    // Hızlı atması için 0.1 saniye (100ms) bekleme
                     await new Promise(resolve => setTimeout(resolve, 100));
                 }
             }
