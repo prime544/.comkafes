@@ -21,7 +21,7 @@ const client = new Client({
 const token = process.env.DISCORD_TOKEN;
 const clientId = process.env.CLIENT_ID;
 
-const HEDEF_SUNUCU_ID = 'SUNUCU_ID_BURAYA'; // Kendi Sunucu ID'ni yaz
+const HEDEF_SUNUCU_ID = '1506325267910754434'; // Kendi Sunucu ID'ni yaz
 const DAVET_LINKI = 'https://discord.gg/yNVnFJS62';
 
 const commands = [
