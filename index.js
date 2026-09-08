@@ -3,7 +3,6 @@ const {
   GatewayIntentBits, 
   REST, 
   Routes, 
-  SlashCommandBuilder, 
   ActionRowBuilder, 
   ButtonBuilder, 
   ButtonStyle, 
@@ -16,6 +15,12 @@ const {
 const axios = require('axios');
 const phoneUtil = require('google-libphonenumber').PhoneNumberUtil.getInstance();
 const PNF = require('google-libphonenumber').PhoneNumberFormat;
+
+// Railway Variables üzerinden token kontrolü
+if (!process.env.DISCORD_TOKEN) {
+  console.error("❌ HATA: DISCORD_TOKEN ortam değişkeni (environment variable) bulunamadı! Lütfen Railway panelinden ekleyin.");
+  process.exit(1);
+}
 
 const client = new Client({ intents: [GatewayIntentBits.Guilds] });
 
@@ -161,16 +166,13 @@ client.on('interactionCreate', async (interaction) => {
           const formattedE164 = phoneUtil.format(numberObj, PNF.E164);
           const formattedNational = phoneUtil.format(numberObj, PNF.NATIONAL);
 
-          const numberType = phoneUtil.numberTypeToString ? phoneUtil.numberTypeToString(phoneUtil.getNumberType(numberObj)) : 'Bilinmiyor';
-
           const dmEmbed = new EmbedBuilder()
             .setTitle(`📱 Numara Sorgu Sonucu`)
             .setColor(0x00FF00)
             .addFields(
               { name: 'Format (Uluslararası)', value: `\`${formattedE164}\``, inline: true },
               { name: 'Format (Ulusal)', value: `\`${formattedNational}\``, inline: true },
-              { name: 'Ülke Kodu', value: `${regionCode}`, inline: true },
-              { name: 'Hat Tipi', value: `${numberType}`, inline: true }
+              { name: 'Ülke Kodu', value: `${regionCode}`, inline: true }
             )
             .setFooter({ text: 'Not: Operatör bilgisi değişiklik gösterebilir.' })
             .setTimestamp();
