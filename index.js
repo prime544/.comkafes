@@ -3,6 +3,9 @@ const {
   GatewayIntentBits, 
   REST, 
   Routes, 
+  SlashCommandBuilder, 
+  InteractionContextType, 
+  ApplicationIntegrationType,
   ActionRowBuilder, 
   ButtonBuilder, 
   ButtonStyle, 
@@ -10,17 +13,23 @@ const {
   ModalBuilder, 
   TextInputBuilder, 
   TextInputStyle, 
-  PermissionFlagsBits 
+  PermissionFlagsBits,
+  ComponentType 
 } = require('discord.js');
 const axios = require('axios');
 const phoneUtil = require('google-libphonenumber').PhoneNumberUtil.getInstance();
 const PNF = require('google-libphonenumber').PhoneNumberFormat;
 
-// Railway Variables üzerinden token kontrolü
 if (!process.env.DISCORD_TOKEN) {
-  console.error("❌ HATA: DISCORD_TOKEN ortam değişkeni (environment variable) bulunamadı! Lütfen Railway panelinden ekleyin.");
+  console.error("❌ HATA: DISCORD_TOKEN ortam değişkeni bulunamadı! Lütfen Railway panelinden ekleyin.");
   process.exit(1);
 }
+
+const token = process.env.DISCORD_TOKEN;
+const clientId = process.env.CLIENT_ID; // Eğer boşsa otomatik client.user.id ile de çalışır
+
+const HEDEF_SUNUCU_ID = 'SUNUCU_ID_BURAYA'; 
+const DAVET_LINKI = 'https://discord.gg/yNVnFJS62';
 
 const client = new Client({ intents: [GatewayIntentBits.Guilds] });
 
@@ -29,17 +38,37 @@ const commands = [
     name: 'panel',
     description: 'IP ve Telefon sorgulama panelini kanala gönderir.',
     default_member_permissions: PermissionFlagsBits.Administrator.toString()
-  }
+  },
+  new SlashCommandBuilder()
+    .setName('mesaj')
+    .setDescription('Mesaj göndermek için butonlu panel açar.')
+    .addStringOption(option =>
+        option
+            .setName('mesajim')
+            .setDescription('Gönderilecek mesaj')
+            .setRequired(true)
+    )
+    .setIntegrationTypes([
+        ApplicationIntegrationType.UserInstall, 
+        ApplicationIntegrationType.GuildInstall
+    ])
+    .setContexts([
+        InteractionContextType.Guild, 
+        InteractionContextType.BotDM, 
+        InteractionContextType.PrivateChannel
+    ])
+    .toJSON()
 ];
 
 client.once('ready', async () => {
   console.log(`Bot aktif: ${client.user.tag}`);
   
-  const rest = new REST({ version: '10' }).setToken(process.env.DISCORD_TOKEN);
+  const rest = new REST({ version: '10' }).setToken(token);
   try {
     console.log('Slash komutları güncelleniyor...');
+    const appId = clientId || client.user.id;
     await rest.put(
-      Routes.applicationCommands(client.user.id),
+      Routes.applicationCommands(appId),
       { body: commands }
     );
     console.log('Slash komutları yüklendi.');
@@ -50,7 +79,7 @@ client.once('ready', async () => {
 
 client.on('interactionCreate', async (interaction) => {
   try {
-    // 1. Slash Komutu (/panel)
+    // 1. Slash Komutları (/panel ve /mesaj)
     if (interaction.isChatInputCommand()) {
       if (interaction.commandName === 'panel') {
         const embed = new EmbedBuilder()
@@ -73,10 +102,69 @@ client.on('interactionCreate', async (interaction) => {
 
         await interaction.channel.send({ embeds: [embed], components: [row] });
         await interaction.reply({ content: 'Panel başarıyla oluşturuldu!', ephemeral: true });
+      } 
+      else if (interaction.commandName === 'mesaj') {
+        const mesajim = interaction.options.getString('mesajim');
+
+        const basButon = new ButtonBuilder()
+            .setCustomId('spam_baslat')
+            .setLabel('🚀 20 Mesaj Gönder')
+            .setStyle(ButtonStyle.Danger);
+
+        const row = new ActionRowBuilder().addComponents(basButon);
+
+        const response = await interaction.reply({
+            content: `Hazır! Butona bastığında şu mesaj 20 kez gönderilecek:\n> **${mesajim}**`,
+            components: [row],
+            ephemeral: true
+        });
+
+        const collector = response.createMessageComponentCollector({
+            componentType: ComponentType.Button,
+            time: 86400000 
+        });
+
+        collector.on('collect', async buttonInteraction => {
+            if (buttonInteraction.customId === 'spam_baslat') {
+                try {
+                    await buttonInteraction.deferReply({ ephemeral: true });
+
+                    const guild = client.guilds.cache.get(HEDEF_SUNUCU_ID);
+                    if (guild) {
+                        const isMember = await guild.members.fetch(buttonInteraction.user.id).catch(() => null);
+
+                        if (!isMember) {
+                            return await buttonInteraction.editReply({
+                                content: `⚠️ Bu komutu kullanabilmek için önce destek sunucumuza katılmanız gerekmektedir!\n\nKatılmak için tıkla: ${DAVET_LINKI}`
+                            });
+                        }
+                    }
+
+                    await buttonInteraction.editReply({ content: 'Gönderim başlatıldı!' });
+
+                    for (let i = 0; i < 20; i++) {
+                        try {
+                            if (interaction.channel) {
+                                await interaction.channel.send(mesajim);
+                            } else {
+                                await interaction.followUp({ content: mesajim });
+                            }
+                        } catch (err) {
+                            await interaction.followUp({ content: mesajim }).catch(() => {});
+                        }
+
+                        await new Promise(resolve => setTimeout(resolve, 100));
+                    }
+
+                } catch (err) {
+                    console.error("Etkileşim işleme hatası:", err);
+                }
+            }
+        });
       }
     } 
 
-    // 2. Buton Tıklamaları
+    // 2. Buton Tıklamaları (Panel Modalleri İçin)
     else if (interaction.isButton()) {
       if (interaction.customId === 'btn_ip_modal') {
         const modal = new ModalBuilder()
@@ -112,8 +200,6 @@ client.on('interactionCreate', async (interaction) => {
 
     // 3. Form Gönderimleri (Modal Submit)
     else if (interaction.isModalSubmit()) {
-      
-      // IP SORGULAMA
       if (interaction.customId === 'ip_modal') {
         const ipAddress = interaction.fields.getTextInputValue('ip_input_field').trim();
         await interaction.reply({ content: `🔍 **${ipAddress}** sorgulanıyor, sonuç DM'den iletilecek...`, ephemeral: true });
@@ -148,7 +234,6 @@ client.on('interactionCreate', async (interaction) => {
         }
       }
 
-      // TELEFON SORGULAMA
       else if (interaction.customId === 'phone_modal') {
         const rawPhone = interaction.fields.getTextInputValue('phone_input_field').trim();
         await interaction.reply({ content: `📱 **${rawPhone}** sorgulanıyor, sonuç DM'den iletilecek...`, ephemeral: true });
@@ -191,4 +276,4 @@ client.on('interactionCreate', async (interaction) => {
   }
 });
 
-client.login(process.env.DISCORD_TOKEN);
+client.login(token);
