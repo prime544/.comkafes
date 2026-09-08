@@ -4,8 +4,6 @@ const {
   REST, 
   Routes, 
 SlashCommandBuilder, 
-    InteractionContextType, 
-    ApplicationIntegrationType,
   ActionRowBuilder, 
   ButtonBuilder, 
   ButtonStyle, 
@@ -13,8 +11,7 @@ SlashCommandBuilder,
   ModalBuilder, 
   TextInputBuilder, 
   TextInputStyle, 
-  PermissionFlagsBits, 
-ComponentType 
+  PermissionFlagsBits 
 } = require('discord.js');
 const axios = require('axios');
 const phoneUtil = require('google-libphonenumber').PhoneNumberUtil.getInstance();
