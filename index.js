@@ -1,138 +1,197 @@
+require('dotenv').config();
 const { 
-    Client, 
-    GatewayIntentBits, 
-    REST, 
-    Routes, 
-    SlashCommandBuilder, 
+  Client, 
+  GatewayIntentBits, 
+  REST, 
+  Routes, 
+SlashCommandBuilder, 
     InteractionContextType, 
     ApplicationIntegrationType,
-    ButtonBuilder,
-    ButtonStyle,
-    ActionRowBuilder,
-    ComponentType
+  ActionRowBuilder, 
+  ButtonBuilder, 
+  ButtonStyle, 
+  EmbedBuilder, 
+  ModalBuilder, 
+  TextInputBuilder, 
+  TextInputStyle, 
+  PermissionFlagsBits, 
+ComponentType 
 } = require('discord.js');
+const axios = require('axios');
+const phoneUtil = require('google-libphonenumber').PhoneNumberUtil.getInstance();
+const PNF = require('google-libphonenumber').PhoneNumberFormat;
 
-const client = new Client({ 
-    intents: [
-        GatewayIntentBits.Guilds,
-    ] 
-});
-
-const token = process.env.DISCORD_TOKEN;
-const clientId = process.env.CLIENT_ID;
-
-const HEDEF_SUNUCU_ID = '1506325267910754434'; // Kendi Sunucu ID'ni yaz
-const DAVET_LINKI = 'https://discord.gg/yNVnFJS62';
+const client = new Client({ intents: [GatewayIntentBits.Guilds] });
 
 const commands = [
-    new SlashCommandBuilder()
-        .setName('mesaj')
-        .setDescription('Mesaj göndermek için butonlu panel açar.')
-        .addStringOption(option =>
-            option
-                .setName('mesajim')
-                .setDescription('Gönderilecek mesaj')
-                .setRequired(true)
-        )
-        .setIntegrationTypes([
-            ApplicationIntegrationType.UserInstall, 
-            ApplicationIntegrationType.GuildInstall
-        ])
-        .setContexts([
-            InteractionContextType.Guild, 
-            InteractionContextType.BotDM, 
-            InteractionContextType.PrivateChannel
-        ])
-        .toJSON()
+  {
+    name: 'panel',
+    description: 'IP ve Telefon sorgulama panelini kanala gönderir.',
+    default_member_permissions: PermissionFlagsBits.Administrator.toString()
+  }
 ];
 
 client.once('ready', async () => {
-    console.log(`Bot aktif: ${client.user.tag}`);
-
-    if (!token || !clientId) {
-        console.error("HATA: DISCORD_TOKEN veya CLIENT_ID eksik!");
-        return;
-    }
-
-    const rest = new REST({ version: '10' }).setToken(token);
-
-    try {
-        await rest.put(
-            Routes.applicationCommands(clientId),
-            { body: commands }
-        );
-        console.log('Slash komutları güncellendi!');
-    } catch (error) {
-        console.error('Komut kaydı hatası:', error);
-    }
+  console.log(`Bot aktif: ${client.user.tag}`);
+  
+  const rest = new REST({ version: '10' }).setToken(process.env.DISCORD_TOKEN);
+  try {
+    console.log('Slash komutları güncelleniyor...');
+    await rest.put(
+      Routes.applicationCommands(client.user.id),
+      { body: commands }
+    );
+    console.log('Slash komutları yüklendi.');
+  } catch (error) {
+    console.error('Komut yükleme hatası:', error);
+  }
 });
 
-client.on('interactionCreate', async interaction => {
-    if (!interaction.isChatInputCommand()) return;
+client.on('interactionCreate', async (interaction) => {
+  // 1. Slash Komutu (/panel)
+  if (interaction.isChatInputCommand()) {
+    if (interaction.commandName === 'panel') {
+      const embed = new EmbedBuilder()
+        .setTitle('🌐 Bilgi Sorgulama Paneli')
+        .setDescription('Aşağıdaki butonları kullanarak **IP** veya **Telefon Numarası (Ülke/Operatör)** bilgisi sorgulayabilirsiniz.\n\n*Sonuçlar DM kutunuza gönderilecektir.*')
+        .setColor(0x2B2D31);
 
-    if (interaction.commandName === 'mesaj') {
-        const mesajim = interaction.options.getString('mesajim');
+      const row = new ActionRowBuilder().addComponents(
+        new ButtonBuilder()
+          .setCustomId('btn_ip_modal')
+          .setLabel('IP Sorgula')
+          .setEmoji('🌐')
+          .setStyle(ButtonStyle.Primary),
+        new ButtonBuilder()
+          .setCustomId('btn_phone_modal')
+          .setLabel('Telefon Sorgula')
+          .setEmoji('📱')
+          .setStyle(ButtonStyle.Success)
+      );
 
-        const basButon = new ButtonBuilder()
-            .setCustomId('spam_baslat')
-            .setLabel('🚀 20 Mesaj Gönder')
-            .setStyle(ButtonStyle.Danger);
-
-        const row = new ActionRowBuilder().addComponents(basButon);
-
-        const response = await interaction.reply({
-            content: `Hazır! Butona her bastığında şu mesaj 20 kez gönderilecek:\n> **${mesajim}**`,
-            components: [row],
-            ephemeral: true
-        });
-
-        const collector = response.createMessageComponentCollector({
-            componentType: ComponentType.Button,
-            time: 86400000 
-        });
-
-        collector.on('collect', async buttonInteraction => {
-            if (buttonInteraction.customId === 'spam_baslat') {
-                try {
-                    // KİLİT NOKTA: 3 saniye zaman aşımı hatasını (Etkileşim başarısız) önlemek için anında defer veriyoruz
-                    await buttonInteraction.deferReply({ ephemeral: true });
-
-                    // SUNUCU ÜYELİK KONTROLÜ
-                    const guild = client.guilds.cache.get(HEDEF_SUNUCU_ID);
-                    
-                    if (guild) {
-                        const isMember = await guild.members.fetch(buttonInteraction.user.id).catch(() => null);
-
-                        if (!isMember) {
-                            return await buttonInteraction.editReply({
-                                content: `⚠️ Bu botu kullanabilmek için önce destek sunucumuza katılmanız gerekmektedir!\n\nKatılmak için tıkla: ${DAVET_LINKI}`
-                            });
-                        }
-                    }
-
-                    await buttonInteraction.editReply({ content: 'Gönderim başlatıldı!' });
-
-                    // 20 MESAJ GÖNDERME DÖNGÜSÜ
-                    for (let i = 0; i < 20; i++) {
-                        try {
-                            if (interaction.channel) {
-                                await interaction.channel.send(mesajim);
-                            } else {
-                                await interaction.followUp({ content: mesajim });
-                            }
-                        } catch (err) {
-                            await interaction.followUp({ content: mesajim }).catch(() => {});
-                        }
-
-                        await new Promise(resolve => setTimeout(resolve, 100));
-                    }
-
-                } catch (err) {
-                    console.error("Etkileşim işleme hatası:", err);
-                }
-            }
-        });
+      await interaction.channel.send({ embeds: [embed], components: [row] });
+      await interaction.reply({ content: 'Panel başarıyla oluşturuldu!', ephemeral: true });
     }
+  } 
+
+  // 2. Buton Tıklamaları
+  else if (interaction.isButton()) {
+    if (interaction.customId === 'btn_ip_modal') {
+      const modal = new ModalBuilder()
+        .setCustomId('ip_modal')
+        .setTitle('IP Sorgulama Formu');
+
+      const ipInput = new TextInputBuilder()
+        .setCustomId('ip_input_field')
+        .setLabel('IP Adresi')
+        .setPlaceholder('Örn: 8.8.8.8')
+        .setStyle(TextInputStyle.Short)
+        .setRequired(true);
+
+      modal.addComponents(new ActionRowBuilder().addComponents(ipInput));
+      await interaction.showModal(modal);
+    } 
+    else if (interaction.customId === 'btn_phone_modal') {
+      const modal = new ModalBuilder()
+        .setCustomId('phone_modal')
+        .setTitle('Telefon Sorgulama Formu');
+
+      const phoneInput = new TextInputBuilder()
+        .setCustomId('phone_input_field')
+        .setLabel('Telefon Numarası (Ülke Koduyla)')
+        .setPlaceholder('Örn: +905320000000')
+        .setStyle(TextInputStyle.Short)
+        .setRequired(true);
+
+      modal.addComponents(new ActionRowBuilder().addComponents(phoneInput));
+      await interaction.showModal(modal);
+    }
+  } 
+
+  // 3. Form Gönderimleri (Modal Submit)
+  else if (interaction.isModalSubmit()) {
+    
+    // IP SORGULAMA
+    if (interaction.customId === 'ip_modal') {
+      const ipAddress = interaction.fields.getTextInputValue('ip_input_field').trim();
+      await interaction.reply({ content: `🔍 **${ipAddress}** sorgulanıyor, sonuç DM'den iletilecek...`, ephemeral: true });
+
+      try {
+        const response = await axios.get(`http://ip-api.com/json/${ipAddress}?fields=status,message,country,countryCode,regionName,city,zip,isp,org,query`);
+        const data = response.data;
+
+        if (data.status === 'fail') {
+          await interaction.user.send(`❌ **Hata:** \`${ipAddress}\` adresi sorgulanamadı. (${data.message || 'Geçersiz IP'})`).catch(() => {});
+          return;
+        }
+
+        const dmEmbed = new EmbedBuilder()
+          .setTitle(`🌐 IP Sorgu Sonucu: ${data.query}`)
+          .setColor(0x00FF00)
+          .addFields(
+            { name: 'Ülke', value: `${data.country} (${data.countryCode})`, inline: true },
+            { name: 'Şehir / Bölge', value: `${data.city} / ${data.regionName}`, inline: true },
+            { name: 'Posta Kodu', value: data.zip || 'Bilinmiyor', inline: true },
+            { name: 'İnternet Sağlayıcı (ISP)', value: data.isp || 'Bilinmiyor', inline: false },
+            { name: 'Organizasyon', value: data.org || 'Yok', inline: true }
+          )
+          .setTimestamp();
+
+        await interaction.user.send({ embeds: [dmEmbed] }).catch(() => {
+          interaction.followUp({ content: '⚠️ DM kutunuz kapalı olduğu için sonuç gönderilemedi!', ephemeral: true });
+        });
+
+      } catch (err) {
+        console.error('API Hatası:', err);
+      }
+    }
+
+    // TELEFON SORGULAMA
+    else if (interaction.customId === 'phone_modal') {
+      const rawPhone = interaction.fields.getTextInputValue('phone_input_field').trim();
+      await interaction.reply({ content: `📱 **${rawPhone}** sorgulanıyor, sonuç DM'den iletilecek...`, ephemeral: true });
+
+      try {
+        const numberObj = phoneUtil.parseAndKeepRawInput(rawPhone);
+        const isValid = phoneUtil.isValidNumber(numberObj);
+
+        if (!isValid) {
+          await interaction.user.send(`❌ **Hata:** \`${rawPhone}\` geçerli bir telefon numarası formatında değil. Lütfen ülke koduyla birlikte yazın (Örn: +90...).`).catch(() => {});
+          return;
+        }
+
+        const regionCode = phoneUtil.getRegionCodeForNumber(numberObj);
+        const formattedE164 = phoneUtil.format(numberObj, PNF.E164);
+        const formattedNational = phoneUtil.format(numberObj, PNF.NATIONAL);
+
+        // Numara tipi tespiti (Mobil / Sabit Hat)
+        const numberType = phoneUtil.getNumberType(numberObj);
+        let typeString = 'Bilinmiyor';
+        if (numberType === 1) typeString = 'Mobil Hat';
+        else if (numberType === 0) typeString = 'Sabit Hat';
+
+        // Numara Detay Bilgisi
+        const dmEmbed = new EmbedBuilder()
+          .setTitle(`📱 Numara Sorgu Sonucu`)
+          .setColor(0x00FF00)
+          .addFields(
+            { name: 'Format (Uluslararası)', value: `\`${formattedE164}\``, inline: true },
+            { name: 'Format (Ulusal)', value: `\`${formattedNational}\``, inline: true },
+            { name: 'Ülke Kodu', value: `${regionCode}`, inline: true },
+            { name: 'Hat Tipi', value: `${typeString}`, inline: true }
+          )
+          .setFooter({ text: 'Not: Operatör bilgisi numara taşımaya bağlı olarak değişiklik gösterebilir.' })
+          .setTimestamp();
+
+        await interaction.user.send({ embeds: [dmEmbed] }).catch(() => {
+          interaction.followUp({ content: '⚠️ DM kutunuz kapalı olduğu için sonuç gönderilemedi!', ephemeral: true });
+        });
+
+      } catch (err) {
+        await interaction.user.send(`❌ **Hata:** Numara çözümlenemedi. Lütfen başında \`+\` ve ülke kodu olacak şekilde tekrar deneyin.`).catch(() => {});
+      }
+    }
+  }
 });
 
-client.login(token);
+client.login(process.env.DISCORD_TOKEN);
