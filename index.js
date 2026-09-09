@@ -1,5 +1,6 @@
 const { Client, GatewayIntentBits, PermissionsBitField } = require('discord.js');
 
+// Sadece mesajlar ve webhooklar için gerekli temel intentler bırakıldı (Intent hatası vermez)
 const client = new Client({
     intents: [
         GatewayIntentBits.Guilds,
@@ -31,7 +32,7 @@ client.on('messageCreate', async (message) => {
         }
 
         try {
-            // 1. Komut mesajını sil
+            // 1. Komut mesajını hemen sil
             await message.delete().catch(() => {});
 
             // 2. Yetki kontrolü
@@ -51,7 +52,7 @@ client.on('messageCreate', async (message) => {
                 });
             }
 
-            // 4. Hedef kullanıcının sunucudaki adı ve avatarı
+            // 4. Hedef kullanıcının ismi ve avatarı
             const member = await message.guild.members.fetch(targetUser.id).catch(() => null);
             const displayName = member ? member.displayName : targetUser.username;
             const avatarURL = targetUser.displayAvatarURL({ dynamic: true, size: 512 });
@@ -69,5 +70,4 @@ client.on('messageCreate', async (message) => {
     }
 });
 
-// Railway için process.env.TOKEN kullanıyoruz
 client.login(process.env.TOKEN);
