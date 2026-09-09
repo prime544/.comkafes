@@ -1,225 +1,325 @@
 const {
-  Client,
-  GatewayIntentBits,
-  REST,
-  Routes,
-  SlashCommandBuilder
+    Client,
+    GatewayIntentBits,
+    REST,
+    Routes,
+    SlashCommandBuilder
 } = require("discord.js");
 
 const {
-  Player
-} = require("discord-player");
+    joinVoiceChannel,
+    createAudioPlayer,
+    createAudioResource,
+    AudioPlayerStatus,
+    NoSubscriberBehavior,
+    StreamType
+} = require("@discordjs/voice");
 
-const {
-  DefaultExtractors
-} = require("@discord-player/extractor");
-
+const { spawn } = require("child_process");
+const fs = require("fs");
+const path = require("path");
+const https = require("https");
 const ffmpeg = require("ffmpeg-static");
 
-process.env.FFMPEG_PATH = ffmpeg;
-
-const TOKEN = process.env.DISCORD_TOKEN;
+const TOKEN = process.env.TOKEN;
 const CLIENT_ID = process.env.CLIENT_ID;
 
-if (!TOKEN) {
-  console.error("❌ DISCORD_TOKEN eksik!");
-  process.exit(1);
-}
-
-if (!CLIENT_ID) {
-  console.error("❌ CLIENT_ID eksik!");
-  process.exit(1);
+if (!TOKEN || !CLIENT_ID) {
+    console.log("TOKEN veya CLIENT_ID bulunamadı.");
+    process.exit(1);
 }
 
 const client = new Client({
-  intents: [
-    GatewayIntentBits.Guilds,
-    GatewayIntentBits.GuildVoiceStates
-  ]
+    intents: [
+        GatewayIntentBits.Guilds,
+        GatewayIntentBits.GuildVoiceStates
+    ]
 });
 
-const player = new Player(client);
+const ytDlpPath = path.join(__dirname, "yt-dlp");
+
+async function downloadYtDlp() {
+    if (fs.existsSync(ytDlpPath)) {
+        return;
+    }
+
+    console.log("yt-dlp indiriliyor...");
+
+    await new Promise((resolve, reject) => {
+        const file = fs.createWriteStream(ytDlpPath);
+
+        https.get(
+            "https://github.com/yt-dlp/yt-dlp/releases/latest/download/yt-dlp_linux",
+            response => {
+                if (response.statusCode >= 300 && response.statusCode < 400 && response.headers.location) {
+                    https.get(response.headers.location, redirected => {
+                        redirected.pipe(file);
+
+                        file.on("finish", () => {
+                            file.close(() => {
+                                fs.chmodSync(ytDlpPath, 0o755);
+                                resolve();
+                            });
+                        });
+                    }).on("error", reject);
+                } else {
+                    response.pipe(file);
+
+                    file.on("finish", () => {
+                        file.close(() => {
+                            fs.chmodSync(ytDlpPath, 0o755);
+                            resolve();
+                        });
+                    });
+                }
+            }
+        ).on("error", reject);
+    });
+
+    console.log("yt-dlp hazır.");
+}
 
 const commands = [
-  new SlashCommandBuilder()
-    .setName("play")
-    .setDescription("Müzik oynatır.")
-    .addStringOption(option =>
-      option
-        .setName("link")
-        .setDescription("SoundCloud veya direkt ses bağlantısı")
-        .setRequired(true)
-    ),
+    new SlashCommandBuilder()
+        .setName("play")
+        .setDescription("YouTube videosu oynatır.")
+        .addStringOption(option =>
+            option
+                .setName("url")
+                .setDescription("YouTube video URL'si")
+                .setRequired(true)
+        ),
 
-  new SlashCommandBuilder()
-    .setName("stop")
-    .setDescription("Müziği durdurur."),
+    new SlashCommandBuilder()
+        .setName("stop")
+        .setDescription("Müziği durdurur ve ses kanalından çıkar.")
+];
 
-  new SlashCommandBuilder()
-    .setName("skip")
-    .setDescription("Şarkıyı geçer.")
-].map(command => command.toJSON());
+const players = new Map();
 
 client.once("ready", async () => {
+    console.log(`${client.user.tag} aktif!`);
 
-  console.log(`✅ Bot aktif: ${client.user.tag}`);
+    await downloadYtDlp();
 
-  await player.extractors.loadMulti(
-    DefaultExtractors
-  );
-
-  console.log("✅ Müzik extractorları yüklendi.");
-
-  const rest = new REST({
-    version: "10"
-  }).setToken(TOKEN);
-
-  try {
+    const rest = new REST({ version: "10" }).setToken(TOKEN);
 
     await rest.put(
-      Routes.applicationCommands(CLIENT_ID),
-      {
-        body: commands
-      }
+        Routes.applicationCommands(CLIENT_ID),
+        {
+            body: commands.map(command => command.toJSON())
+        }
     );
 
-    console.log("✅ Slash komutları yüklendi.");
-
-  } catch (error) {
-
-    console.error(
-      "❌ Slash komut hatası:",
-      error
-    );
-
-  }
-
+    console.log("Slash komutları yüklendi.");
 });
 
-client.on(
-  "interactionCreate",
-  async interaction => {
-
-    if (!interaction.isChatInputCommand()) {
-      return;
-    }
-
-    // ==============================
-    // PLAY
-    // ==============================
+client.on("interactionCreate", async interaction => {
+    if (!interaction.isChatInputCommand()) return;
 
     if (interaction.commandName === "play") {
-
-      const voiceChannel =
-        interaction.member?.voice?.channel;
-
-      if (!voiceChannel) {
-
-        return interaction.reply({
-          content:
-            "❌ Önce ses kanalına gir knk.",
-          ephemeral: true
-        });
-
-      }
-
-      const link =
-        interaction.options.getString("link");
-
-      await interaction.deferReply();
-
-      try {
-
-        const { track } =
-          await player.play(
-            voiceChannel,
-            link,
-            {
-              nodeOptions: {
-                metadata: interaction
-              }
-            }
-          );
-
-        await interaction.editReply(
-          `🎵 **${track.title}** çalıyor!`
-        );
-
-      } catch (error) {
-
-        console.error(
-          "PLAY ERROR:",
-          error
-        );
-
-        await interaction.editReply(
-          "❌ Bu bağlantı oynatılamadı.\n\n" +
-          "Desteklenen bir SoundCloud bağlantısı " +
-          "veya direkt ses akışı bağlantısı dene."
-        );
-
-      }
-
-      return;
+        await playMusic(interaction);
     }
-
-    // ==============================
-    // STOP
-    // ==============================
 
     if (interaction.commandName === "stop") {
+        stopMusic(interaction);
+    }
+});
 
-      const queue =
-        player.nodes.get(
-          interaction.guild.id
-        );
+async function playMusic(interaction) {
+    const member = interaction.member;
 
-      if (!queue) {
-
+    if (!member.voice.channel) {
         return interaction.reply({
-          content:
-            "❌ Şu anda müzik çalmıyor.",
-          ephemeral: true
+            content: "❌ Önce bir ses kanalına gir knk.",
+            ephemeral: true
         });
-
-      }
-
-      queue.delete();
-
-      return interaction.reply(
-        "⏹️ Müzik durduruldu."
-      );
     }
 
-    // ==============================
-    // SKIP
-    // ==============================
+    const url = interaction.options.getString("url");
 
-    if (interaction.commandName === "skip") {
-
-      const queue =
-        player.nodes.get(
-          interaction.guild.id
-        );
-
-      if (!queue) {
-
+    if (
+        !url.includes("youtube.com/") &&
+        !url.includes("youtu.be/")
+    ) {
         return interaction.reply({
-          content:
-            "❌ Şu anda müzik çalmıyor.",
-          ephemeral: true
+            content: "❌ Sadece YouTube URL'si kullanabilirsin.",
+            ephemeral: true
         });
-
-      }
-
-      queue.node.skip();
-
-      return interaction.reply(
-        "⏭️ Şarkı geçildi."
-      );
     }
 
-  }
-);
+    await interaction.deferReply();
+
+    try {
+        const old = players.get(interaction.guild.id);
+
+        if (old) {
+            try {
+                old.ytdlp.kill("SIGKILL");
+            } catch {}
+
+            try {
+                old.ffmpeg.kill("SIGKILL");
+            } catch {}
+
+            try {
+                old.connection.destroy();
+            } catch {}
+
+            players.delete(interaction.guild.id);
+        }
+
+        const channel = member.voice.channel;
+
+        const connection = joinVoiceChannel({
+            channelId: channel.id,
+            guildId: channel.guild.id,
+            adapterCreator: channel.guild.voiceAdapterCreator,
+            selfDeaf: true
+        });
+
+        const player = createAudioPlayer({
+            behaviors: {
+                noSubscriber: NoSubscriberBehavior.Stop
+            }
+        });
+
+        connection.subscribe(player);
+
+        const ytdlp = spawn(
+            ytDlpPath,
+            [
+                "--no-playlist",
+                "--no-warnings",
+                "--quiet",
+                "--js-runtimes",
+                "node",
+                "--remote-components",
+                "ejs:github",
+                "-f",
+                "bestaudio/best",
+                "-o",
+                "-",
+                url
+            ],
+            {
+                stdio: ["ignore", "pipe", "pipe"]
+            }
+        );
+
+        const ffmpegProcess = spawn(
+            ffmpeg,
+            [
+                "-hide_banner",
+                "-loglevel",
+                "error",
+                "-i",
+                "pipe:0",
+                "-f",
+                "s16le",
+                "-ar",
+                "48000",
+                "-ac",
+                "2",
+                "pipe:1"
+            ],
+            {
+                stdio: ["pipe", "pipe", "pipe"]
+            }
+        );
+
+        ytdlp.stdout.pipe(ffmpegProcess.stdin);
+
+        const resource = createAudioResource(
+            ffmpegProcess.stdout,
+            {
+                inputType: StreamType.Raw
+            }
+        );
+
+        player.play(resource);
+
+        players.set(interaction.guild.id, {
+            connection,
+            player,
+            ytdlp,
+            ffmpeg: ffmpegProcess
+        });
+
+        player.once(AudioPlayerStatus.Idle, () => {
+            try {
+                ytdlp.kill("SIGKILL");
+            } catch {}
+
+            try {
+                ffmpegProcess.kill("SIGKILL");
+            } catch {}
+
+            try {
+                connection.destroy();
+            } catch {}
+
+            players.delete(interaction.guild.id);
+        });
+
+        ytdlp.stderr.on("data", data => {
+            const text = data.toString().trim();
+
+            if (text) {
+                console.log("[yt-dlp]", text);
+            }
+        });
+
+        ytdlp.on("error", error => {
+            console.log("yt-dlp hatası:", error.message);
+        });
+
+        ffmpegProcess.on("error", error => {
+            console.log("FFmpeg hatası:", error.message);
+        });
+
+        await interaction.editReply(
+            `🎵 **Oynatılıyor!**\n${url}`
+        );
+
+    } catch (error) {
+        console.error(error);
+
+        await interaction.editReply(
+            "❌ Video oynatılırken bir hata oluştu."
+        );
+    }
+}
+
+function stopMusic(interaction) {
+    const data = players.get(interaction.guild.id);
+
+    if (!data) {
+        return interaction.reply({
+            content: "❌ Şu anda çalan bir müzik yok.",
+            ephemeral: true
+        });
+    }
+
+    try {
+        data.ytdlp.kill("SIGKILL");
+    } catch {}
+
+    try {
+        data.ffmpeg.kill("SIGKILL");
+    } catch {}
+
+    try {
+        data.player.stop();
+    } catch {}
+
+    try {
+        data.connection.destroy();
+    } catch {}
+
+    players.delete(interaction.guild.id);
+
+    return interaction.reply("⏹️ Müzik durduruldu.");
+}
 
 client.login(TOKEN);
