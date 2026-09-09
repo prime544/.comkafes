@@ -1,13 +1,14 @@
 {
-  "name": "simple-music-bot",
+  "name": "fallix-simple-music",
   "version": "1.0.0",
   "main": "index.js",
   "scripts": {
     "start": "node index.js"
   },
   "dependencies": {
-    "@discordjs/voice": "^0.19.2",
     "discord.js": "^14.27.0",
+    "discord-player": "^7.2.0",
+    "@discord-player/extractor": "^7.1.0",
     "ffmpeg-static": "^5.2.0"
   }
 }
