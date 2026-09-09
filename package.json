@@ -1,13 +1,13 @@
 {
-  "name": "discord-multi-msg-bot",
+  "name": "fallix-music-bot",
   "version": "1.0.0",
   "main": "index.js",
   "scripts": {
     "start": "node index.js"
   },
   "dependencies": {
-    "axios": "^1.11.0",
     "discord.js": "^14.21.0",
-    "google-libphonenumber": "^3.2.42"
+    "kazagumo": "^3.0.2",
+    "shoukaku": "^4.1.1"
   }
 }
