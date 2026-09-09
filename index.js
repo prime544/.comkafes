@@ -58,6 +58,10 @@ const client = new Client({
 
 const commands = [
 
+  // ============================
+  // /PANEL
+  // ============================
+
   new SlashCommandBuilder()
     .setName("panel")
     .setDescription(
@@ -67,6 +71,10 @@ const commands = [
       PermissionFlagsBits.Administrator.toString()
     )
     .toJSON(),
+
+  // ============================
+  // /MESAJ
+  // ============================
 
   new SlashCommandBuilder()
     .setName("mesaj")
@@ -78,6 +86,26 @@ const commands = [
         .setName("mesajim")
         .setDescription("Gönderilecek mesaj")
         .setRequired(true)
+    )
+    .setIntegrationTypes([
+      ApplicationIntegrationType.UserInstall,
+      ApplicationIntegrationType.GuildInstall
+    ])
+    .setContexts([
+      InteractionContextType.Guild,
+      InteractionContextType.BotDM,
+      InteractionContextType.PrivateChannel
+    ])
+    .toJSON(),
+
+  // ============================
+  // /PING
+  // ============================
+
+  new SlashCommandBuilder()
+    .setName("ping")
+    .setDescription(
+      "Botun Railway/Discord gecikmesini gösterir."
     )
     .setIntegrationTypes([
       ApplicationIntegrationType.UserInstall,
@@ -264,7 +292,7 @@ client.on("interactionCreate", async interaction => {
 
             try {
 
-              // 🚫 BUTONA BASILDIĞINDA DA HEDEF SUNUCU KONTROLÜ
+              // 🚫 BUTONA BASILDIĞINDA HEDEF SUNUCU KONTROLÜ
               if (
                 buttonInteraction.guild &&
                 buttonInteraction.guild.id ===
@@ -366,6 +394,60 @@ client.on("interactionCreate", async interaction => {
 
           }
         );
+
+      }
+
+      // ========================================
+      // /PING
+      // ========================================
+
+      else if (interaction.commandName === "ping") {
+
+        const start = Date.now();
+
+        await interaction.reply({
+          content: "🏓 Ping ölçülüyor..."
+        });
+
+        const apiPing =
+          Date.now() - start;
+
+        const websocketPing =
+          client.ws.ping;
+
+        const embed =
+          new EmbedBuilder()
+            .setTitle("🏓 Pong!")
+            .setDescription(
+              "Bot bağlantı durumu ve gecikme bilgileri"
+            )
+            .addFields(
+              {
+                name: "🤖 Bot Gecikmesi",
+                value: `\`${apiPing} ms\``,
+                inline: true
+              },
+              {
+                name: "🌐 Discord WS",
+                value: `\`${websocketPing} ms\``,
+                inline: true
+              },
+              {
+                name: "🚂 Railway",
+                value: "🟢 Aktif",
+                inline: true
+              }
+            )
+            .setColor(0x2B2D31)
+            .setFooter({
+              text: "Fallix • Ping System"
+            })
+            .setTimestamp();
+
+        return interaction.editReply({
+          content: "",
+          embeds: [embed]
+        });
 
       }
 
