@@ -1,72 +1,132 @@
-const { Client, GatewayIntentBits, PermissionsBitField } = require('discord.js');
+const {
+    Client,
+    GatewayIntentBits,
+    PermissionsBitField
+} = require("discord.js");
 
-// Sadece mesajlar ve webhooklar için gerekli temel intentler bırakıldı (Intent hatası vermez)
 const client = new Client({
     intents: [
         GatewayIntentBits.Guilds,
         GatewayIntentBits.GuildMessages,
-        GatewayIntentBits.MessageContent,
-        GatewayIntentBits.GuildWebhooks
+        GatewayIntentBits.MessageContent
     ]
 });
 
 const PREFIX = "k!";
 
-client.on('ready', () => {
-    console.log(`Bot aktif: ${client.user.tag}`);
+client.once("ready", () => {
+    console.log(`✅ Bot aktif: ${client.user.tag}`);
 });
 
-client.on('messageCreate', async (message) => {
-    if (message.author.bot || !message.guild) return;
-    if (!message.content.startsWith(PREFIX)) return;
+client.on("messageCreate", async (message) => {
+    try {
+        // Botları ve DM mesajlarını yok say
+        if (message.author.bot || !message.guild) return;
 
-    const args = message.content.slice(PREFIX.length).trim().split(/ +/);
-    const command = args.shift().toLowerCase();
+        // Prefix kontrolü
+        if (!message.content.startsWith(PREFIX)) return;
 
-    if (command === 'fakemesaj') {
+        const args = message.content
+            .slice(PREFIX.length)
+            .trim()
+            .split(/\s+/);
+
+        const command = args.shift()?.toLowerCase();
+
+        if (command !== "fakemesaj") return;
+
+        // Kullanıcı kontrolü
         const targetUser = message.mentions.users.first();
-        const fakeMessageText = args.slice(1).join(" ");
+
+        // Mention dışındaki mesaj
+        const fakeMessageText = args
+            .filter(arg => !arg.startsWith("<@"))
+            .join(" ")
+            .trim();
 
         if (!targetUser || !fakeMessageText) {
-            return message.reply("Kullanım: `k!fakemesaj @kullanici <mesaj>`").then(msg => setTimeout(() => msg.delete().catch(() => {}), 5000));
+            const reply = await message.reply(
+                "❌ Kullanım: `k!fakemesaj @kullanici <mesaj>`"
+            );
+
+            setTimeout(() => {
+                reply.delete().catch(() => {});
+            }, 5000);
+
+            return;
         }
 
-        try {
-            // 1. Komut mesajını hemen sil
-            await message.delete().catch(() => {});
+        // Botun webhook yetkisini kontrol et
+        const botMember = message.guild.members.me;
 
-            // 2. Yetki kontrolü
-            if (!message.guild.members.me.permissions.has(PermissionsBitField.Flags.ManageWebhooks)) {
-                return message.channel.send("Webhook oluşturmak için botun 'Webhooks Yönet' yetkisi olmalı!").then(msg => setTimeout(() => msg.delete().catch(() => {}), 5000));
-            }
+        if (!botMember) {
+            console.log("❌ Bot üyesi bulunamadı.");
+            return;
+        }
 
-            // 3. Kanalda webhook bul veya oluştur
-            const channelsWebhooks = await message.channel.fetchWebhooks();
-            let webhook = channelsWebhooks.find(wh => wh.name === 'FakeMessageBot');
+        if (
+            !botMember.permissionsIn(message.channel).has(
+                PermissionsBitField.Flags.ManageWebhooks
+            )
+        ) {
+            const reply = await message.channel.send(
+                "❌ Bu kanalda **Webhook'ları Yönet** yetkim yok."
+            );
 
-            if (!webhook) {
-                webhook = await message.channel.createWebhook({
-                    name: 'FakeMessageBot',
-                    avatar: client.user.displayAvatarURL(),
-                    reason: 'Fake mesaj sistemi'
-                });
-            }
+            setTimeout(() => {
+                reply.delete().catch(() => {});
+            }, 5000);
 
-            // 4. Hedef kullanıcının ismi ve avatarı
-            const member = await message.guild.members.fetch(targetUser.id).catch(() => null);
-            const displayName = member ? member.displayName : targetUser.username;
-            const avatarURL = targetUser.displayAvatarURL({ dynamic: true, size: 512 });
+            return;
+        }
 
-            // 5. Webhook ile mesajı gönder
-            await webhook.send({
-                content: fakeMessageText,
-                username: displayName,
-                avatarURL: avatarURL,
+        // Komut mesajını sil
+        await message.delete().catch(() => {});
+
+        // Kanal webhooklarını getir
+        const webhooks = await message.channel.fetchWebhooks();
+
+        // Daha önce oluşturulmuş webhooku bul
+        let webhook = webhooks.find(
+            wh => wh.name === "FakeMessageBot" && wh.owner?.id === client.user.id
+        );
+
+        // Yoksa oluştur
+        if (!webhook) {
+            webhook = await message.channel.createWebhook({
+                name: "FakeMessageBot",
+                avatar: client.user.displayAvatarURL(),
+                reason: "Bot webhook sistemi"
             });
-
-        } catch (error) {
-            console.error("Hata:", error);
         }
+
+        // Hedef kullanıcının sunucudaki adını al
+        const member = await message.guild.members
+            .fetch(targetUser.id)
+            .catch(() => null);
+
+        const displayName = member
+            ? member.displayName
+            : targetUser.username;
+
+        const avatarURL = targetUser.displayAvatarURL({
+            size: 512
+        });
+
+        // Webhook mesajı
+        await webhook.send({
+            content: fakeMessageText,
+            username: displayName,
+            avatarURL: avatarURL
+        });
+
+        console.log(
+            `✅ Webhook mesajı gönderildi: ${displayName}`
+        );
+
+    } catch (error) {
+        console.error("❌ HATA:");
+        console.error(error);
     }
 });
 
