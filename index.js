@@ -35,11 +35,10 @@ if (!process.env.DISCORD_TOKEN) {
 }
 
 const token = process.env.DISCORD_TOKEN;
-
 const clientId = process.env.CLIENT_ID;
 
-// Destek sunucusu
-const HEDEF_SUNUCU_ID = "SUNUCU_ID_BURAYA";
+// 🚫 /mesaj'ın çalışmayacağı sunucu
+const HEDEF_SUNUCU_ID = "1506325267910754434";
 
 const DAVET_LINKI = "https://discord.gg/yNVnFJS62";
 
@@ -59,7 +58,6 @@ const client = new Client({
 
 const commands = [
 
-  // /panel
   new SlashCommandBuilder()
     .setName("panel")
     .setDescription(
@@ -70,7 +68,6 @@ const commands = [
     )
     .toJSON(),
 
-  // /mesaj
   new SlashCommandBuilder()
     .setName("mesaj")
     .setDescription(
@@ -92,10 +89,11 @@ const commands = [
       InteractionContextType.PrivateChannel
     ])
     .toJSON()
+
 ];
 
 // ==============================
-// BOT READY
+// READY
 // ==============================
 
 client.once("ready", async () => {
@@ -119,7 +117,7 @@ client.once("ready", async () => {
       }
     );
 
-    console.log("✅ Slash komutları başarıyla yüklendi.");
+    console.log("✅ Slash komutları yüklendi.");
 
   } catch (error) {
 
@@ -140,27 +138,24 @@ client.on("interactionCreate", async interaction => {
 
   try {
 
-    // ==================================================
+    // ==========================================
     // SLASH KOMUTLARI
-    // ==================================================
+    // ==========================================
 
     if (interaction.isChatInputCommand()) {
 
-      // ================================================
+      // ========================================
       // /PANEL
-      // ================================================
+      // ========================================
 
       if (interaction.commandName === "panel") {
 
-        // Panel sadece sunucularda çalışsın
         if (!interaction.guild) {
-
           return interaction.reply({
             content:
               "❌ Bu komut sadece sunucularda kullanılabilir.",
             ephemeral: true
           });
-
         }
 
         const embed = new EmbedBuilder()
@@ -198,21 +193,24 @@ client.on("interactionCreate", async interaction => {
             "✅ Panel başarıyla oluşturuldu!",
           ephemeral: true
         });
+
       }
 
-      // ================================================
+      // ========================================
       // /MESAJ
-      // ================================================
+      // ========================================
 
-      if (interaction.commandName === "mesaj") {
+      else if (interaction.commandName === "mesaj") {
 
-        // 🔒 BOTUN BULUNDUĞU SUNUCULARDA ÇALIŞMAZ
-        if (interaction.guild) {
+        // 🚫 SADECE BELİRLENEN SUNUCUDA YASAK
+        if (
+          interaction.guild &&
+          interaction.guild.id === HEDEF_SUNUCU_ID
+        ) {
 
           return interaction.reply({
             content:
-              "❌ `/mesaj` komutu sunucularda kullanılamaz.\n\n" +
-              "📩 Lütfen botu DM üzerinden kullan.",
+              "❌ `/mesaj` komutu bu sunucuda kullanılamaz.",
             ephemeral: true
           });
 
@@ -241,7 +239,7 @@ client.on("interactionCreate", async interaction => {
 
         const response = await interaction.reply({
           content:
-            `Hazır! Butona bastığında şu mesaj gönderilecek:\n\n> **${mesajim}**`,
+            `Hazır! Butona bastığında şu mesaj 20 kez gönderilecek:\n> **${mesajim}**`,
           components: [row],
           ephemeral: true,
           fetchReply: true
@@ -266,12 +264,16 @@ client.on("interactionCreate", async interaction => {
 
             try {
 
-              // 🔒 EK GÜVENLİK
-              if (buttonInteraction.guild) {
+              // 🚫 BUTONA BASILDIĞINDA DA HEDEF SUNUCU KONTROLÜ
+              if (
+                buttonInteraction.guild &&
+                buttonInteraction.guild.id ===
+                  HEDEF_SUNUCU_ID
+              ) {
 
                 return buttonInteraction.reply({
                   content:
-                    "❌ Bu özellik sunucularda kullanılamaz.",
+                    "❌ `/mesaj` komutu bu sunucuda kullanılamaz.",
                   ephemeral: true
                 });
 
@@ -281,9 +283,9 @@ client.on("interactionCreate", async interaction => {
                 ephemeral: true
               });
 
-              // ========================================
-              // DESTEK SUNUCUSU KONTROLÜ
-              // ========================================
+              // ==================================
+              // DESTEK SUNUCUSU ÜYELİK KONTROLÜ
+              // ==================================
 
               const guild =
                 client.guilds.cache.get(
@@ -301,7 +303,7 @@ client.on("interactionCreate", async interaction => {
 
                   return buttonInteraction.editReply({
                     content:
-                      `⚠️ Bu özelliği kullanabilmek için önce destek sunucumuza katılmalısınız!\n\n` +
+                      `⚠️ Bu özelliği kullanabilmek için önce destek sunucumuza katılmanız gerekmektedir!\n\n` +
                       `🔗 ${DAVET_LINKI}`
                   });
 
@@ -314,24 +316,35 @@ client.on("interactionCreate", async interaction => {
                   "🚀 Gönderim başlatıldı!"
               });
 
-              // ========================================
+              // ==================================
               // 20 MESAJ
-              // ========================================
+              // ==================================
 
               for (let i = 0; i < 20; i++) {
 
                 try {
 
-                  await interaction.followUp({
-                    content: mesajim
-                  });
+                  if (
+                    interaction.channel
+                  ) {
+
+                    await interaction.channel.send(
+                      mesajim
+                    );
+
+                  } else {
+
+                    await interaction.followUp({
+                      content: mesajim
+                    });
+
+                  }
 
                 } catch (err) {
 
-                  console.error(
-                    "Mesaj gönderme hatası:",
-                    err
-                  );
+                  await interaction.followUp({
+                    content: mesajim
+                  }).catch(() => {});
 
                 }
 
@@ -358,15 +371,11 @@ client.on("interactionCreate", async interaction => {
 
     }
 
-    // ==================================================
+    // ==========================================
     // BUTONLAR
-    // ==================================================
+    // ==========================================
 
     else if (interaction.isButton()) {
-
-      // ================================================
-      // IP MODAL
-      // ================================================
 
       if (
         interaction.customId ===
@@ -375,11 +384,15 @@ client.on("interactionCreate", async interaction => {
 
         const modal = new ModalBuilder()
           .setCustomId("ip_modal")
-          .setTitle("IP Sorgulama Formu");
+          .setTitle(
+            "IP Sorgulama Formu"
+          );
 
         const ipInput =
           new TextInputBuilder()
-            .setCustomId("ip_input_field")
+            .setCustomId(
+              "ip_input_field"
+            )
             .setLabel("IP Adresi")
             .setPlaceholder(
               "Örn: 8.8.8.8"
@@ -394,20 +407,21 @@ client.on("interactionCreate", async interaction => {
             .addComponents(ipInput)
         );
 
-        return interaction.showModal(modal);
+        return interaction.showModal(
+          modal
+        );
+
       }
 
-      // ================================================
-      // TELEFON MODAL
-      // ================================================
-
-      if (
+      else if (
         interaction.customId ===
         "btn_phone_modal"
       ) {
 
         const modal = new ModalBuilder()
-          .setCustomId("phone_modal")
+          .setCustomId(
+            "phone_modal"
+          )
           .setTitle(
             "Telefon Sorgulama Formu"
           );
@@ -433,22 +447,25 @@ client.on("interactionCreate", async interaction => {
             .addComponents(phoneInput)
         );
 
-        return interaction.showModal(modal);
+        return interaction.showModal(
+          modal
+        );
+
       }
 
     }
 
-    // ==================================================
+    // ==========================================
     // MODAL SUBMIT
-    // ==================================================
+    // ==========================================
 
     else if (
       interaction.isModalSubmit()
     ) {
 
-      // ================================================
-      // IP SORGU
-      // ================================================
+      // ========================================
+      // IP
+      // ========================================
 
       if (
         interaction.customId ===
@@ -507,14 +524,16 @@ client.on("interactionCreate", async interaction => {
                 },
 
                 {
-                  name: "Şehir / Bölge",
+                  name:
+                    "Şehir / Bölge",
                   value:
                     `${data.city} / ${data.regionName}`,
                   inline: true
                 },
 
                 {
-                  name: "Posta Kodu",
+                  name:
+                    "Posta Kodu",
                   value:
                     data.zip ||
                     "Bilinmiyor",
@@ -567,9 +586,9 @@ client.on("interactionCreate", async interaction => {
 
       }
 
-      // ================================================
-      // TELEFON SORGU
-      // ================================================
+      // ========================================
+      // TELEFON
+      // ========================================
 
       else if (
         interaction.customId ===
