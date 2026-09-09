@@ -3,26 +3,24 @@ const {
   GatewayIntentBits,
   REST,
   Routes,
-  SlashCommandBuilder,
-  EmbedBuilder
+  SlashCommandBuilder
 } = require("discord.js");
 
-const { Connectors } = require("shoukaku");
-const { Kazagumo, Plugins } = require("kazagumo");
+const {
+  joinVoiceChannel,
+  createAudioPlayer,
+  createAudioResource,
+  AudioPlayerStatus,
+  NoSubscriberBehavior,
+  VoiceConnectionStatus,
+  entersState
+} = require("@discordjs/voice");
 
-// ==========================================
-// AYARLAR
-// ==========================================
+const { spawn } = require("child_process");
+const ffmpegPath = require("ffmpeg-static");
 
 const TOKEN = process.env.DISCORD_TOKEN;
 const CLIENT_ID = process.env.CLIENT_ID;
-
-const LAVALINK_HOST = process.env.LAVALINK_HOST;
-const LAVALINK_PORT = Number(process.env.LAVALINK_PORT || 2333);
-const LAVALINK_PASSWORD =
-  process.env.LAVALINK_PASSWORD || "youshallnotpass";
-const LAVALINK_SECURE =
-  process.env.LAVALINK_SECURE === "true";
 
 if (!TOKEN) {
   console.error("❌ DISCORD_TOKEN bulunamadı!");
@@ -34,15 +32,6 @@ if (!CLIENT_ID) {
   process.exit(1);
 }
 
-if (!LAVALINK_HOST) {
-  console.error("❌ LAVALINK_HOST bulunamadı!");
-  process.exit(1);
-}
-
-// ==========================================
-// DISCORD CLIENT
-// ==========================================
-
 const client = new Client({
   intents: [
     GatewayIntentBits.Guilds,
@@ -50,104 +39,36 @@ const client = new Client({
   ]
 });
 
-// ==========================================
-// LAVALINK / KAZAGUMO
-// ==========================================
-
-const shoukaku = {
-  nodes: [
-    {
-      name: "Main",
-      url: `${LAVALINK_HOST}:${LAVALINK_PORT}`,
-      auth: LAVALINK_PASSWORD,
-      secure: LAVALINK_SECURE
-    }
-  ]
-};
-
-const kazagumo = new Kazagumo(
-  {
-    defaultSearchEngine: "youtube",
-    plugins: [
-      new Plugins.PlayerMoved(client)
-    ]
-  },
-  new Connectors.DiscordJS(client),
-  shoukaku.nodes
-);
-
-// ==========================================
-// SLASH KOMUTLARI
-// ==========================================
-
 const commands = [
-
   new SlashCommandBuilder()
     .setName("play")
-    .setDescription("Şarkı çalar.")
+    .setDescription("Direkt ses bağlantısını oynatır.")
     .addStringOption(option =>
       option
-        .setName("şarkı")
-        .setDescription("Şarkı adı veya bağlantı")
+        .setName("link")
+        .setDescription("Ses bağlantısı")
         .setRequired(true)
     ),
 
   new SlashCommandBuilder()
-    .setName("skip")
-    .setDescription("Mevcut şarkıyı geçer."),
-
-  new SlashCommandBuilder()
     .setName("stop")
-    .setDescription("Müziği durdurur ve kuyruğu temizler."),
+    .setDescription("Müziği durdurur."),
 
   new SlashCommandBuilder()
-    .setName("pause")
-    .setDescription("Müziği duraklatır."),
+    .setName("disconnect")
+    .setDescription("Botu ses kanalından çıkarır.")
+].map(x => x.toJSON());
 
-  new SlashCommandBuilder()
-    .setName("resume")
-    .setDescription("Müziği devam ettirir."),
-
-  new SlashCommandBuilder()
-    .setName("queue")
-    .setDescription("Müzik kuyruğunu gösterir."),
-
-  new SlashCommandBuilder()
-    .setName("nowplaying")
-    .setDescription("Şu anda çalan şarkıyı gösterir."),
-
-  new SlashCommandBuilder()
-    .setName("volume")
-    .setDescription("Ses seviyesini ayarlar.")
-    .addIntegerOption(option =>
-      option
-        .setName("seviye")
-        .setDescription("0-100 arası ses seviyesi")
-        .setMinValue(0)
-        .setMaxValue(100)
-        .setRequired(true)
-    )
-
-].map(command => command.toJSON());
-
-// ==========================================
-// READY
-// ==========================================
+const players = new Map();
+const connections = new Map();
 
 client.once("ready", async () => {
-
-  console.log("");
-  console.log("================================");
   console.log(`✅ Bot aktif: ${client.user.tag}`);
-  console.log("🎵 Müzik sistemi hazırlanıyor...");
-  console.log("================================");
 
-  const rest = new REST({
-    version: "10"
-  }).setToken(TOKEN);
+  const rest = new REST({ version: "10" })
+    .setToken(TOKEN);
 
   try {
-
     await rest.put(
       Routes.applicationCommands(CLIENT_ID),
       {
@@ -156,700 +77,247 @@ client.once("ready", async () => {
     );
 
     console.log("✅ Slash komutları yüklendi.");
-
   } catch (error) {
+    console.error("❌ Komut yükleme hatası:", error);
+  }
+});
 
-    console.error(
-      "❌ Slash komut yükleme hatası:",
-      error
+client.on("interactionCreate", async interaction => {
+
+  if (!interaction.isChatInputCommand()) return;
+
+  // =====================================
+  // PLAY
+  // =====================================
+
+  if (interaction.commandName === "play") {
+
+    const voiceChannel =
+      interaction.member?.voice?.channel;
+
+    if (!voiceChannel) {
+      return interaction.reply({
+        content: "❌ Önce bir ses kanalına gir knk.",
+        ephemeral: true
+      });
+    }
+
+    const link =
+      interaction.options.getString("link");
+
+    if (!/^https?:\/\//i.test(link)) {
+      return interaction.reply({
+        content: "❌ Geçerli bir ses bağlantısı gir.",
+        ephemeral: true
+      });
+    }
+
+    await interaction.deferReply();
+
+    try {
+
+      let connection =
+        connections.get(interaction.guild.id);
+
+      if (!connection) {
+
+        connection = joinVoiceChannel({
+          channelId: voiceChannel.id,
+          guildId: interaction.guild.id,
+          adapterCreator:
+            interaction.guild.voiceAdapterCreator,
+          selfDeaf: true
+        });
+
+        connections.set(
+          interaction.guild.id,
+          connection
+        );
+
+        await entersState(
+          connection,
+          VoiceConnectionStatus.Ready,
+          15_000
+        );
+      }
+
+      let player =
+        players.get(interaction.guild.id);
+
+      if (!player) {
+
+        player = createAudioPlayer({
+          behaviors: {
+            noSubscriber:
+              NoSubscriberBehavior.Pause
+          }
+        });
+
+        players.set(
+          interaction.guild.id,
+          player
+        );
+
+        connection.subscribe(player);
+
+        player.on(
+          "error",
+          error => {
+            console.error(
+              "❌ Ses oynatma hatası:",
+              error
+            );
+          }
+        );
+      }
+
+      /*
+       * FFmpeg:
+       * Direkt ses URL'sini Discord'un
+       * anlayacağı Opus/PCM akışına çevirir.
+       */
+
+      const ffmpeg = spawn(
+        ffmpegPath,
+        [
+          "-re",
+          "-i",
+          link,
+
+          "-vn",
+
+          "-f",
+          "s16le",
+
+          "-ar",
+          "48000",
+
+          "-ac",
+          "2",
+
+          "pipe:1"
+        ],
+        {
+          stdio: [
+            "ignore",
+            "pipe",
+            "pipe"
+          ]
+        }
+      );
+
+      ffmpeg.stderr.on(
+        "data",
+        data => {
+          console.log(
+            `[FFmpeg] ${data.toString()}`
+          );
+        }
+      );
+
+      ffmpeg.on(
+        "error",
+        error => {
+          console.error(
+            "❌ FFmpeg başlatılamadı:",
+            error
+          );
+        }
+      );
+
+      const resource =
+        createAudioResource(
+          ffmpeg.stdout,
+          {
+            inputType: "raw"
+          }
+        );
+
+      player.play(resource);
+
+      await interaction.editReply(
+        `🎵 **Müzik başlatıldı!**\n🔗 ${link}`
+      );
+
+    } catch (error) {
+
+      console.error(
+        "❌ /play hatası:",
+        error
+      );
+
+      await interaction.editReply(
+        "❌ Bu bağlantı oynatılamadı."
+      ).catch(() => {});
+    }
+
+    return;
+  }
+
+  // =====================================
+  // STOP
+  // =====================================
+
+  if (interaction.commandName === "stop") {
+
+    const player =
+      players.get(interaction.guild.id);
+
+    if (!player) {
+      return interaction.reply({
+        content: "❌ Çalan müzik yok.",
+        ephemeral: true
+      });
+    }
+
+    player.stop();
+
+    return interaction.reply(
+      "⏹️ Müzik durduruldu."
+    );
+  }
+
+  // =====================================
+  // DISCONNECT
+  // =====================================
+
+  if (
+    interaction.commandName ===
+    "disconnect"
+  ) {
+
+    const connection =
+      connections.get(
+        interaction.guild.id
+      );
+
+    if (!connection) {
+      return interaction.reply({
+        content:
+          "❌ Bot zaten ses kanalında değil.",
+        ephemeral: true
+      });
+    }
+
+    const player =
+      players.get(interaction.guild.id);
+
+    if (player) {
+      player.stop();
+      players.delete(interaction.guild.id);
+    }
+
+    connection.destroy();
+
+    connections.delete(
+      interaction.guild.id
     );
 
+    return interaction.reply(
+      "👋 Ses kanalından çıktım."
+    );
   }
 
 });
-
-// ==========================================
-// LAVALINK EVENTS
-// ==========================================
-
-kazagumo.shoukaku.on(
-  "ready",
-  name => {
-    console.log(`🟢 Lavalink bağlandı: ${name}`);
-  }
-);
-
-kazagumo.shoukaku.on(
-  "error",
-  (name, error) => {
-    console.error(
-      `❌ Lavalink hatası [${name}]:`,
-      error
-    );
-  }
-);
-
-kazagumo.shoukaku.on(
-  "close",
-  (name, code, reason) => {
-    console.log(
-      `🔴 Lavalink bağlantısı kapandı [${name}]`,
-      code,
-      reason
-    );
-  }
-);
-
-kazagumo.shoukaku.on(
-  "disconnect",
-  name => {
-    console.log(
-      `⚠️ Lavalink bağlantısı kesildi: ${name}`
-    );
-  }
-);
-
-// ==========================================
-// PLAYER START
-// ==========================================
-
-kazagumo.on(
-  "playerStart",
-  async player => {
-
-    const channel =
-      client.channels.cache.get(
-        player.textId
-      );
-
-    if (!channel) return;
-
-    const track =
-      player.queue.current;
-
-    if (!track) return;
-
-    const embed =
-      new EmbedBuilder()
-        .setTitle("🎵 Şarkı Çalıyor")
-        .setDescription(
-          `**${track.title}**`
-        )
-        .addFields(
-          {
-            name: "🎤 Sanatçı",
-            value:
-              track.author || "Bilinmiyor",
-            inline: true
-          },
-          {
-            name: "⏱️ Süre",
-            value:
-              track.length
-                ? formatTime(track.length)
-                : "Bilinmiyor",
-            inline: true
-          }
-        )
-        .setColor(0x2b2d31);
-
-    await channel.send({
-      embeds: [embed]
-    }).catch(() => {});
-
-  }
-);
-
-// ==========================================
-// QUEUE END
-// ==========================================
-
-kazagumo.on(
-  "playerEmpty",
-  async player => {
-
-    const channel =
-      client.channels.cache.get(
-        player.textId
-      );
-
-    if (channel) {
-
-      await channel.send(
-        "✅ Müzik kuyruğu bitti."
-      ).catch(() => {});
-
-    }
-
-    setTimeout(() => {
-
-      const current =
-        kazagumo.players.get(
-          player.guildId
-        );
-
-      if (current && current.queue.size === 0) {
-
-        current.destroy();
-
-      }
-
-    }, 30000);
-
-  }
-);
-
-// ==========================================
-// TRACK ERROR
-// ==========================================
-
-kazagumo.on(
-  "playerException",
-  async (player, data) => {
-
-    const channel =
-      client.channels.cache.get(
-        player.textId
-      );
-
-    if (!channel) return;
-
-    await channel.send(
-      `❌ Şarkı oynatılırken hata oluştu:\n\`${data?.exception?.message || "Bilinmeyen hata"}\``
-    ).catch(() => {});
-
-  }
-);
-
-// ==========================================
-// INTERACTION
-// ==========================================
-
-client.on(
-  "interactionCreate",
-  async interaction => {
-
-    if (!interaction.isChatInputCommand()) {
-      return;
-    }
-
-    // ======================================
-    // PLAY
-    // ======================================
-
-    if (
-      interaction.commandName === "play"
-    ) {
-
-      const query =
-        interaction.options.getString(
-          "şarkı"
-        );
-
-      const member =
-        interaction.member;
-
-      const voiceChannel =
-        member?.voice?.channel;
-
-      if (!voiceChannel) {
-
-        return interaction.reply({
-          content:
-            "❌ Önce bir ses kanalına gir knk.",
-          ephemeral: true
-        });
-
-      }
-
-      await interaction.deferReply();
-
-      try {
-
-        let player =
-          kazagumo.players.get(
-            interaction.guild.id
-          );
-
-        if (!player) {
-
-          player =
-            await kazagumo.createPlayer({
-              guildId:
-                interaction.guild.id,
-
-              voiceId:
-                voiceChannel.id,
-
-              textId:
-                interaction.channel.id,
-
-              deaf: true
-            });
-
-        }
-
-        const result =
-          await kazagumo.search(
-            query,
-            {
-              requester:
-                interaction.user
-            }
-          );
-
-        if (
-          !result ||
-          !result.tracks ||
-          result.tracks.length === 0
-        ) {
-
-          return interaction.editReply({
-            content:
-              "❌ Şarkı bulunamadı."
-          });
-
-        }
-
-        if (
-          result.type === "PLAYLIST"
-        ) {
-
-          for (
-            const track of result.tracks
-          ) {
-
-            player.queue.add(track);
-
-          }
-
-          await interaction.editReply({
-            content:
-              `📚 **${result.tracks.length}** şarkı kuyruğa eklendi.`
-          });
-
-        } else {
-
-          player.queue.add(
-            result.tracks[0]
-          );
-
-          const track =
-            result.tracks[0];
-
-          await interaction.editReply({
-            content:
-              `🎵 **${track.title}** kuyruğa eklendi.`
-          });
-
-        }
-
-        if (
-          !player.playing &&
-          !player.paused
-        ) {
-
-          await player.play();
-
-        }
-
-      } catch (error) {
-
-        console.error(
-          "❌ /play hatası:",
-          error
-        );
-
-        await interaction.editReply({
-          content:
-            "❌ Şarkı oynatılırken bir hata oluştu."
-        }).catch(() => {});
-
-      }
-
-      return;
-    }
-
-    // ======================================
-    // SKIP
-    // ======================================
-
-    if (
-      interaction.commandName === "skip"
-    ) {
-
-      const player =
-        kazagumo.players.get(
-          interaction.guild.id
-        );
-
-      if (!player) {
-
-        return interaction.reply({
-          content:
-            "❌ Şu anda müzik çalmıyor.",
-          ephemeral: true
-        });
-
-      }
-
-      if (
-        !player.queue.current
-      ) {
-
-        return interaction.reply({
-          content:
-            "❌ Şu anda müzik çalmıyor.",
-          ephemeral: true
-        });
-
-      }
-
-      await player.skip();
-
-      return interaction.reply({
-        content:
-          "⏭️ Şarkı geçildi!"
-      });
-
-    }
-
-    // ======================================
-    // STOP
-    // ======================================
-
-    if (
-      interaction.commandName === "stop"
-    ) {
-
-      const player =
-        kazagumo.players.get(
-          interaction.guild.id
-        );
-
-      if (!player) {
-
-        return interaction.reply({
-          content:
-            "❌ Aktif müzik bulunmuyor.",
-          ephemeral: true
-        });
-
-      }
-
-      player.queue.clear();
-
-      player.destroy();
-
-      return interaction.reply({
-        content:
-          "⏹️ Müzik durduruldu ve kuyruk temizlendi."
-      });
-
-    }
-
-    // ======================================
-    // PAUSE
-    // ======================================
-
-    if (
-      interaction.commandName === "pause"
-    ) {
-
-      const player =
-        kazagumo.players.get(
-          interaction.guild.id
-        );
-
-      if (!player) {
-
-        return interaction.reply({
-          content:
-            "❌ Aktif müzik bulunmuyor.",
-          ephemeral: true
-        });
-
-      }
-
-      if (player.paused) {
-
-        return interaction.reply({
-          content:
-            "⏸️ Müzik zaten duraklatılmış.",
-          ephemeral: true
-        });
-
-      }
-
-      await player.pause(true);
-
-      return interaction.reply({
-        content:
-          "⏸️ Müzik duraklatıldı."
-      });
-
-    }
-
-    // ======================================
-    // RESUME
-    // ======================================
-
-    if (
-      interaction.commandName === "resume"
-    ) {
-
-      const player =
-        kazagumo.players.get(
-          interaction.guild.id
-        );
-
-      if (!player) {
-
-        return interaction.reply({
-          content:
-            "❌ Aktif müzik bulunmuyor.",
-          ephemeral: true
-        });
-
-      }
-
-      if (!player.paused) {
-
-        return interaction.reply({
-          content:
-            "▶️ Müzik zaten oynuyor.",
-          ephemeral: true
-        });
-
-      }
-
-      await player.pause(false);
-
-      return interaction.reply({
-        content:
-          "▶️ Müzik devam ediyor."
-      });
-
-    }
-
-    // ======================================
-    // QUEUE
-    // ======================================
-
-    if (
-      interaction.commandName === "queue"
-    ) {
-
-      const player =
-        kazagumo.players.get(
-          interaction.guild.id
-        );
-
-      if (!player) {
-
-        return interaction.reply({
-          content:
-            "📭 Kuyruk boş.",
-          ephemeral: true
-        });
-
-      }
-
-      const current =
-        player.queue.current;
-
-      const queue =
-        player.queue
-          .slice(0, 10);
-
-      let text = "";
-
-      if (current) {
-
-        text +=
-          `🎵 **Şimdi:** ${current.title}\n\n`;
-
-      }
-
-      if (queue.length === 0) {
-
-        text +=
-          "📭 Kuyrukta başka şarkı yok.";
-
-      } else {
-
-        queue.forEach(
-          (track, index) => {
-
-            text +=
-              `**${index + 1}.** ${track.title}\n`;
-
-          }
-        );
-
-      }
-
-      const embed =
-        new EmbedBuilder()
-          .setTitle("🎶 Müzik Kuyruğu")
-          .setDescription(text)
-          .setColor(0x2b2d31)
-          .setFooter({
-            text:
-              `Toplam: ${player.queue.size} şarkı`
-          });
-
-      return interaction.reply({
-        embeds: [embed]
-      });
-
-    }
-
-    // ======================================
-    // NOW PLAYING
-    // ======================================
-
-    if (
-      interaction.commandName ===
-      "nowplaying"
-    ) {
-
-      const player =
-        kazagumo.players.get(
-          interaction.guild.id
-        );
-
-      if (
-        !player ||
-        !player.queue.current
-      ) {
-
-        return interaction.reply({
-          content:
-            "❌ Şu anda müzik çalmıyor.",
-          ephemeral: true
-        });
-
-      }
-
-      const track =
-        player.queue.current;
-
-      const embed =
-        new EmbedBuilder()
-          .setTitle("🎵 Şimdi Çalıyor")
-          .setDescription(
-            `**${track.title}**`
-          )
-          .addFields(
-            {
-              name: "🎤 Sanatçı",
-              value:
-                track.author || "Bilinmiyor",
-              inline: true
-            },
-            {
-              name: "⏱️ Süre",
-              value:
-                formatTime(track.length),
-              inline: true
-            }
-          )
-          .setColor(0x2b2d31);
-
-      return interaction.reply({
-        embeds: [embed]
-      });
-
-    }
-
-    // ======================================
-    // VOLUME
-    // ======================================
-
-    if (
-      interaction.commandName === "volume"
-    ) {
-
-      const player =
-        kazagumo.players.get(
-          interaction.guild.id
-        );
-
-      if (!player) {
-
-        return interaction.reply({
-          content:
-            "❌ Aktif müzik bulunmuyor.",
-          ephemeral: true
-        });
-
-      }
-
-      const volume =
-        interaction.options.getInteger(
-          "seviye"
-        );
-
-      await player.setVolume(
-        volume
-      );
-
-      return interaction.reply({
-        content:
-          `🔊 Ses seviyesi **%${volume}** olarak ayarlandı.`
-      });
-
-    }
-
-  }
-);
-
-// ==========================================
-// TIME FORMAT
-// ==========================================
-
-function formatTime(ms) {
-
-  if (!ms || ms < 0) {
-    return "00:00";
-  }
-
-  const totalSeconds =
-    Math.floor(ms / 1000);
-
-  const hours =
-    Math.floor(
-      totalSeconds / 3600
-    );
-
-  const minutes =
-    Math.floor(
-      (totalSeconds % 3600) / 60
-    );
-
-  const seconds =
-    totalSeconds % 60;
-
-  if (hours > 0) {
-
-    return (
-      `${hours}:` +
-      `${String(minutes).padStart(2, "0")}:` +
-      `${String(seconds).padStart(2, "0")}`
-    );
-
-  }
-
-  return (
-    `${String(minutes).padStart(2, "0")}:` +
-    `${String(seconds).padStart(2, "0")}`
-  );
-
-}
-
-// ==========================================
-// LOGIN
-// ==========================================
 
 client.login(TOKEN);
